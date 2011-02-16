@@ -1,0 +1,952 @@
+<?php
+// $Id: $
+
+/**
+ * Implementation of hook_menu
+ *
+ * hook_menu documentation @ http://api.drupal.org/api/function/hook_menu/6
+ *
+ *"type": A bitmask of flags describing properties of the menu item. Many shortcut bitmasks are provided as constants in menu.inc:
+ * MENU_NORMAL_ITEM: Normal menu items show up in the menu tree and can be moved/hidden by the administrator.
+ * MENU_CALLBACK: Callbacks simply register a path so that the correct function is fired when the URL is accessed.
+ * MENU_SUGGESTED_ITEM: Modules may "suggest" menu items that the administrator may enable.
+ * MENU_LOCAL_TASK: Local tasks are rendered as tabs by default.
+ * MENU_DEFAULT_LOCAL_TASK: Every set of local tasks should provide one "default" task, that links to the same path as its parent when clicked.
+ * If the "type" key is omitted, MENU_NORMAL_ITEM is assumed. *
+ *
+ */
+
+function lifesearch_menu() {
+  $items = array ();
+  $items ['animal'] = array (
+    'title' => t('Get My Animal'),
+    'page callback' => 'animal_page',
+    'access arguments' => array('access content'),
+    'type' => MENU_SUGGESTED_ITEM,
+  );
+
+  $items ['advanced_search'] = array (
+    'title' => t('Advanced Search'),
+    'page callback' => 'advanced_search_page',
+    'access arguments' => array('access content'),
+    'type' => MENU_SUGGESTED_ITEM,
+  );
+
+
+  $items['animal_results'] = array (
+    'title' => t('Get My Animal Results'),
+    'page callback' => 'animal_results_page',
+    'access arguments' => array('access content'),
+    'type' => MENU_SUGGESTED_ITEM,
+  );
+
+    $items['search/autocomplete'] = array(
+      'title' => 'Autocomplete for search',
+      'page callback' => '_search_autocomplete',
+      'access arguments' => array('use autocomplete'),  //or whatever permission makes sense
+      'type' => MENU_CALLBACK
+    );
+
+
+  //if you forget this-- the hook won't create the menu item
+  return $items;
+}
+
+
+/*
+ * Searches for matches in user input from each of the tables.
+ * $table= table to search for matches
+ * $matches = matches already found
+ * $string = string to search for matches
+ */
+function getMatches($table,$matches,$string)
+{
+  //animal is what I named the database in the settings.php file $db_url['animal'] = 'mysqli://test:password@130.126.115.144/tinerella';
+  db_set_active('animal');
+  $result=db_query_range("SELECT name FROM $table WHERE LOWER(name) LIKE LOWER('%s%')", $string, 0, 5);
+  while ($data = db_fetch_object($result)) {
+    $matches[$data->name] = check_plain($data->name);
+  }
+  db_set_active('default');
+  return $matches;
+}
+
+
+/**
+* Helper function that aids in autocompleting user input
+* $string = user input
+*/
+function _search_autocomplete($string) {
+    
+  $matches = array();
+  for($i=0;$i<count(Table::$tables);$i++)
+  {
+      $matches = getMatches(Table::$tables[$i],$matches,$string);
+      
+  }
+
+  print drupal_to_js($matches);
+  exit();
+}
+
+/**
+ * page callbacks created in the Implementation of hook_menu
+ *
+ * drupal_get_form() documentation @ http://api.drupal.org/api/function/drupal_get_form/6
+ *
+ *The first page that is displayed to the user
+ */
+function animal_page () {
+    $output = drupal_get_form('animal_form');
+    $output .=l(t('Advanced Search'),'advanced_search',array('attributes' => array('class' => 'widelink','rel' => 'lightbox',)));
+  //return drupal_get_form('animal_form');
+    return $output;
+}
+
+/**
+ * Creating the actual form itself happens here
+ * Docs @
+ * http://api.drupal.org/api/file/developer/topics/forms_api.html/6
+ * http://api.drupal.org/api/file/developer/topics/forms_api_reference.html/6
+ *
+ */
+function animal_form ($form_state) {
+  $form = array();
+
+  $form ['search'] =array (
+    '#type' => 'textfield',
+    '#title' => 'Search',
+    '#maxlength' => 128,
+    '#autocomplete_path' => 'search/autocomplete',
+  );
+
+//a "submit" button
+  $form['submit'] = array (
+    '#type' => 'submit',
+    '#value' => t('Search'),
+  );
+
+  
+  // If you forget this line your form will never exist
+  return $form ;
+}
+
+
+/**
+ * Validation function. Users must enter a valid string
+ *
+ * Docs @
+ * http://api.drupal.org/api/function/_form_validate/6
+ *
+ * form_set_error() Docs @
+ * http://api.drupal.org/api/function/form_set_error/6
+ *
+ *
+ */
+function animal_form_validate ($form_id, &$form_state) {
+  $query = check_plain($form_state['values']['search']);
+  if ($query=="") {
+    form_set_error('search', t('You must enter a valid string.'));
+  }
+}
+
+/**
+ * form_submit function, once the form passes the validation (above) this runs
+ *
+ * Docs @
+ * http://api.drupal.org/api/file/developer/topics/forms_api.html/6
+ * (under Submitting Forms)
+ *
+ * drupal_set_message() Docs @
+ * http://api.drupal.org/api/function/drupal_set_message/6
+ *
+ */
+function animal_form_submit ($form_id, &$form_state) {
+
+  $search = $form_state['values']['search'];
+
+  $output = t('Searching for @search...', array('@search' => $search));
+ /*
+  * the @search is a placeholder that will call check_plain() on that string
+  * Docs @ http://api.drupal.org/api/function/t
+  * check_plain() makes sure there's nothing nasty going on in the text written by the user.
+  * http://api.drupal.org/api/function/check_plain
+  */
+
+  //Alternate method which does the same thing
+  /*
+  $output = t('Searching for ');
+  $output .= check_plain($search);
+  $output .= t(' the form was submitted successfully');
+   */
+  drupal_get_messages();
+  drupal_set_message($output);
+
+  $query_string = 'search=';
+  $query_string .= $form_state['values']['search'];
+  $query_string .= '&offset=0';
+
+
+  //Goes to the animal results page.
+  drupal_goto("animal_results", $query_string);
+}
+
+function advanced_search_page(){
+    $output = drupal_get_form('advanced_search_form');
+    return $output;
+}
+
+function advanced_search_form ($form_state) {
+  $form = array();
+
+  $form ['search'] =array (
+    '#type' => 'textfield',
+    '#title' => 'Search',
+    '#maxlength' => 128,
+  );
+
+  $form['search_in'] = array(
+    '#type' => 'radios',
+
+    '#title' => t('Search In'),
+
+    '#default_value' => t('slide_taxonomykingdom'),
+    '#options' => array(
+
+        'slide_taxonomykingdom' =>t('Kingdom'),
+
+        'slide_taxonomyphylum' =>t('Phylum'),
+
+        'slide_taxonomyclass' =>t('Class'),
+
+        'slide_taxonomyorder' =>t('Order'),
+
+        'slide_taxonomyinfraorder' =>t('InfraOrder'),
+
+        'slide_taxonomysuborder' =>t('SubOrder'),
+
+        'slide_taxonomysuperfamily' =>t('SuperFamily'),
+
+        'slide_taxonomyfamily' =>t('Family'),
+
+        'slide_taxonomytribe' =>t('Tribe'),
+
+        'slide_taxonomygenus' =>t('Genus'),
+
+        'slide_taxonomyspecies' =>t('Species'),
+
+        ),
+   );
+
+  $form['return'] = array(
+    '#type' => 'radios',
+
+    '#title' => t('Return'),
+
+    '#default_value' => 'taxonomy_kingdom_id',
+    '#options' => array(
+
+        'taxonomy_kingdom_id' =>t('Kingdom'),
+
+        'taxonomy_phylum_id' =>t('Phylum'),
+
+        'taxonomy_class_id' =>t('Class'),
+
+        'taxonomy_order_id' =>t('Order'),
+
+        'taxonomy_infraorder_id' =>t('InfraOrder'),
+
+        'taxonomy_suborder_id' =>t('SubOrder'),
+
+        'taxonomy_superfamily_id' =>t('SuperFamily'),
+
+        'taxonomy_family_id' =>t('Family'),
+
+        'taxonomy_tribe_id' =>t('Tribe'),
+
+        'taxonomy_genus_id' =>t('Genus'),
+
+        'taxonomy_species_id' =>t('Species'),
+
+        'specimen_preservation_id' => t('Preservation'),
+
+        'specimen_type_id' => t('Type'),
+
+        'specimen_total_specimens' => t('Total Specimens'),
+
+        'specimen_num_adult_males' => t('Number of Adult Males'),
+
+        'specimen_num_adult_females' => t('Number of Adult Females'),
+
+        'specimen_num_unsexed_adults' => t('Number of Unsexed Adults'),
+
+        'specimen_num_immatures' => t('Number of Immatures'),
+
+        'specimen_num_pupae' => t('Number of Pupae'),
+
+        'specimen_num_exuviae' => t('Number of Exuviae'),
+
+        'specimen_host_name' => t('Host Name'),
+
+        'specimen_host_taxonomy' => t('Host Taxonomy'),
+
+        'specimen_country' => t('Specimen Country'),
+
+        'specimen_state' => t('Specimen State'),
+
+        'specimen_county' => t('Specimen County'),
+
+        'specimen_locality' => t('Specimen Locality'),
+
+        'special_collection' => t('Specimen Collection')
+
+        ),
+   );
+
+//a "submit" button
+  $form['submit'] = array (
+    '#type' => 'submit',
+    '#value' => t('Search'),
+  );
+
+
+  // If you forget this line your form will never exist
+  return $form ;
+}
+
+
+/**
+ * Validation function. Users must enter a valid string
+ *
+ * Docs @
+ * http://api.drupal.org/api/function/_form_validate/6
+ *
+ * form_set_error() Docs @
+ * http://api.drupal.org/api/function/form_set_error/6
+ *
+ *
+ */
+function advanced_search_validate ($form_id, &$form_state) {
+  $query = check_plain($form_state['values']['search']);
+  if ($query=="") {
+    form_set_error('search', t('You must enter a valid string.'));
+  }
+}
+
+/**
+ * form_submit function, once the form passes the validation (above) this runs
+ *
+ * Docs @
+ * http://api.drupal.org/api/file/developer/topics/forms_api.html/6
+ * (under Submitting Forms)
+ *
+ * drupal_set_message() Docs @
+ * http://api.drupal.org/api/function/drupal_set_message/6
+ *
+ */
+function advanced_search_submit ($form_id, &$form_state) {
+
+  $search = $form_state['values']['search'];
+
+  $output = t('Searching for @search...', array('@search' => $search));
+ /*
+  * the @search is a placeholder that will call check_plain() on that string
+  * Docs @ http://api.drupal.org/api/function/t
+  * check_plain() makes sure there's nothing nasty going on in the text written by the user.
+  * http://api.drupal.org/api/function/check_plain
+  */
+
+  //Alternate method which does the same thing
+  /*
+  $output = t('Searching for ');
+  $output .= check_plain($search);
+  $output .= t(' the form was submitted successfully');
+   */
+  drupal_get_messages();
+  drupal_set_message($output);
+
+  $query_string = 'search=';
+  $query_string .= $form_state['values']['search'];
+  $query_string = '&search_in=';
+  $query_string .= $form_state['values']['searchin'];
+
+  //Need to change this
+  $query_string = '&return=';
+  $query_string .= $form_state['values']['return'];
+
+  $query_string .= '&offset=0';
+
+
+  //Goes to the animal results page.
+  drupal_goto("advanced_search_results", $query_string);
+}
+
+/*
+ * Returns the results for the advanced search
+ * NOT COMPLETE
+ */
+
+function advanced_search_results_page()
+{
+  $search = $_REQUEST['search'];
+  $offset = $_REQUEST['offset'];
+  $table = $_REQUEST['searchin'];
+  $return = $_REQUEST['return'];
+
+  $query = "SELECT id FROM $table WHERE LOWER(name) = LOWER('$search')";
+
+  //animal is what I named the database in the settings.php file $db_url['animal'] = 'mysqli://test:password@130.126.115.144/tinerella';
+  db_set_active('animal');
+  $result=db_query($query);
+  while($result_data=array_values(db_fetch_array($result)))
+  {
+        $id = $result_data[0];
+  }
+  db_set_active('default');
+
+  $slideCol = Table::get_SlideCol($table);
+
+  $slideTable = Table::get_SlideTable();
+
+  //This result returns id of the whatever the user wants returned. Then we must search in that particular table to get its actual value
+  $query2 =  "SELECT $return FROM $slideTable WHERE LOWER($slideCol) = LOWER('$search') LIMIT $offset,$offset+10";
+
+  //animal is what I named the database in the settings.php file $db_url['animal'] = 'mysqli://test:password@130.126.115.144/tinerella';
+  db_set_active('animal');
+  $result2=db_query($query2);
+  db_set_active('default');
+
+  //NOT COMPLETE!!!
+  return;
+
+}
+
+
+
+
+/*
+ * This page diplays all the results. The processing of the query starts from here
+ *
+ */
+
+function animal_results_page ()
+{
+  $search = $_REQUEST['search'];
+  $offset = $_REQUEST['offset'];
+  //Fetches an array of all the tables in the database, that are relevant to the representation of a species.
+  $tables = Table::$tables;
+
+  //The top most table in the hierarchy is input as one of the parameters along with the search string
+  // and an offset that represents which result to display first. i.e an offset of 100 would mean the results from 100th
+  // result would be displayed
+  $result = get_Results($tables[0],$search,$offset);
+
+  //If the query doesn't exist in the database then, the form is displayed again and the user is informed
+  //that the search term doesn't exist in the database
+  if(!$result)
+  {
+      drupal_get_messages();
+      $output = t('@search could not be found', array('@search' => $search));
+      drupal_set_message($output);
+      drupal_goto("animal");
+      return ;
+  }
+  $output = "<br>";
+
+
+  $i=0;
+  while($i<count($result))
+  {
+      $output .= $result[$i];
+      $output .= "<br>";
+      $i++;
+  }
+
+  drupal_get_messages();
+
+  //results are output here
+  return $output;
+}
+
+
+/*
+ * gets results for the particular query
+ *
+ * @param $table -  The table to begin searching from in a top down fashion . i.e the table is searched first
+ *                  followed by tables lower down the hierarchy
+ *
+ * @param $search - the search query
+ *
+ * @param $offset - offset that represents which result to display first. i.e an offset of 100 would mean the results from 100th
+ *                  result would be displayed
+ */
+function get_Results($table,$search,$offset)
+{
+    if($table==false)
+    {
+        return false;
+    }
+
+
+    $description_data = get_DescriptionData($search,$table);//gets all the information from the upper tables for that search string
+
+
+    if($description_data!=array())
+    {
+        //gets an array of headings. One for each piece of info.
+        $description_headers = get_DescriptionHeaders($table,count($description_data));
+        for($i=0;$i<count($description_headers);$i++)
+        {
+            $description_rows[]=array("$description_headers[$i] : $description_data[$i]");
+        }
+        
+        //gets all the information from the lower table. i.e gets all the species for if the search string is a genus.
+        //result data also contains the relavant latitude and longtitude info
+        $result_data = get_ResultData($search,$table,$offset);
+
+        //Checks if any result is returned
+        $result_rows = $result_data[0];
+        if($result_rows!=array(array()))
+        {
+            //gets an array of headings. One for each type of info.
+            $result_headers = get_ResultHeaders($table);
+
+            //returns the results in the form of a table
+            return array(theme('table',array("Basic Description"),$description_rows),theme('table',$result_headers,$result_rows));
+        }
+
+        //returns the results in the form of a table
+        return array(theme('table',array("Basic Description"),$description_rows));
+
+    }
+
+    //if the search term isn't in the current table we go down the hierarchy and start search in the lower tables
+    else
+    {
+        $lower_table = Table::getLowerTable($table);       
+        return get_Results($lower_table,$search,$offset);
+    }
+     
+}
+
+/*
+ * Returns all the information for that query from the particular table and all the tables lower down the hierarchy
+ *
+ *  @param $search - the term to search for
+ *
+ *  @param $table -  The table to begin searching from in a top down fashion . i.e the table is searched first
+ *                  followed by tables lower down the hierarchy
+ *
+ *  @param $offset - offset that represents which result to display first. i.e an offset of 100 would mean the results from 100th
+ *                  result would be displayed
+ *
+ * @return array - of all info about the search query in the first index and all the lat longs of the relavant species in the second
+ */
+function get_ResultData($search,$table,$offset)
+{
+    //Checks if there are any more tables to get information from
+    $lower_table = Table::getLowerTable($table);
+    if(!$lower_table)
+    {
+        return array(array());
+    }
+
+   
+   $column_name = $lower_table.".name";
+
+   //creates a query to return the ids for all names that match the search term
+   $query = "SELECT id FROM $table WHERE LOWER(name) = LOWER('$search')";
+
+
+   return buildjoin($query,$column_name,$lower_table,$offset);
+}
+
+
+/*
+ * Returns all the information for that query from the particular table and all the tables lower down the hierarchy
+ *
+ *  @param $query - the term to search for
+ *
+ *  @param $column_names - all the columns from which we fetch the info. Each column is separated from another by a comma
+ *
+ *
+ *  @param $table -  The table to begin searching from in a top down fashion . i.e the table is searched first
+ *                  followed by tables lower down the hierarchy
+ *
+ *  @param $offset - offset that represents which result to display first. i.e an offset of 100 would mean the results from 100th
+ *                  result would be displayed
+ *
+ *  @return array - of all info about the search query in the first index and all the lat longs of the relavant species in the second
+ */
+function buildjoin($query, $column_names,$table,$offset)
+{
+    $lower_table = Table::getLowerTable($table);
+    $table_columns = Table::getForeignColumns($table);
+    if(!$lower_table)
+    {
+        //animal is what I named the database in the settings.php file $db_url['animal'] = 'mysqli://test:password@130.126.115.144/tinerella';
+        db_set_active('animal');
+
+        //creates a query that returns all the information from each of the
+        // relevant columns from the tables. Returns 10 results starting from the offsetth result
+        $query = "SELECT $column_names,$table.id FROM $table WHERE $table_columns[0] IN ($query) LIMIT $offset,$offset+10";
+        $result=db_query($query);
+        db_set_active('default');
+
+        
+        while($table_data=array_values(db_fetch_array($result)))
+        {
+             //gets the species id. and uses it to find the latitude and longtitude
+             $species_id = array_pop($table_data);
+             $rows[]= $table_data;
+             $latlong = get_LatLong($species_id);
+        }
+
+        return array(0=>$rows,1=>$latlong);
+    }
+    else
+    {
+        $column_names = $column_names.",$lower_table.name";
+        $query = "SELECT id FROM $table WHERE $table_columns[0] IN ($query)";
+        return buildjoin($query, $column_names, $lower_table,$offset);
+    }
+}
+
+/*
+ * Returns all the lat longs for the particular specis
+ *
+ *  @param $species_id - the id of the species in the species table
+ *
+ *  @return array - of the lat longs species
+ */
+
+function get_LatLong($species_id)
+{
+    $table = Table::get_LatLongTable();
+    $lat_Column = Table::get_LatColumn();
+    $long_Column = Table::get_LongColumn();
+    $species_Column = Table::get_SpeciesColumn();
+
+    //animal is what I named the database in the settings.php file $db_url['animal'] = 'mysqli://test:password@130.126.115.144/tinerella';
+    db_set_active('animal');
+    $query = "SELECT $lat_Column,$long_Column FROM $table WHERE $species_Column = '$species_id' ";
+    $result=db_query($query);
+    db_set_active('default');
+    
+    if($latlong=array_values(db_fetch_array($result)))
+    {
+        return $latlong;
+    }
+
+    else
+    {
+        return array();
+    }
+
+
+}
+
+/*
+ * Gets basic description data
+ */
+function get_DescriptionData($search,$table)
+{
+    if(!$table)
+    {
+        return array();
+    }
+
+    //animal is what I named the database in the settings.php file $db_url['animal'] = 'mysqli://test:password@130.126.115.144/tinerella';
+    db_set_active('animal');
+    $query = "SELECT * FROM $table WHERE LOWER(name) LIKE LOWER('$search') LIMIT 0,1";
+    $result=db_query($query);
+    db_set_active('default');
+
+    $table_data=array_values(db_fetch_array($result));
+
+    $upper_table=Table::getUpperTable($table);
+    $upper_table_data = get_DescriptionDataId($table_data[2],$upper_table);
+    //$table_data[2] is the id of the foreign key or null if there are no results.
+    unset($table_data[0]);
+    unset($table_data[2]);
+    
+    return array_merge($upper_table_data,$table_data);
+}
+
+
+function get_DescriptionDataId($id,$table)
+{
+    if(!$table)
+    {
+        return array();
+    }
+
+    //animal is what I named the database in the settings.php file $db_url['animal'] = 'mysqli://test:password@130.126.115.144/tinerella';
+    db_set_active('animal');
+    $query = "SELECT * FROM $table WHERE LOWER(id) = LOWER('$id')";
+    $result=db_query($query);
+    db_set_active('default');
+
+    $table_data=array_values(db_fetch_array($result));
+
+    $upper_table=Table::getUpperTable($table);
+    $upper_table_data = get_DescriptionDataId($table_data[2],$upper_table);
+
+    unset($table_data[0]);
+    unset($table_data[2]);
+    
+
+    return array_merge($upper_table_data,$table_data);
+
+}
+
+
+
+
+/*
+ * Gets the headings for each result in the basic description
+ *
+ */
+function get_DescriptionHeaders($table,$count)
+{
+    if(!$table || $count ==0)
+    {
+        return array();
+    }
+
+    $headers = Table::getHeaders($table);
+    $upperTable = Table::getUpperTable($table);
+    $upperHeaders = get_DescriptionHeaders($upperTable,$count-1);
+
+    return array_merge($upperHeaders,$headers);
+}
+
+
+
+/*
+ * Gets the headings for results
+ *
+ */
+
+function get_ResultHeaders($table)
+{
+    if(!$table)
+    {
+        return false;
+    }
+
+    $lowerTable = Table::getLowerTable($table);
+    $headers = Table::getHeaders($lowerTable);
+    $lowerHeaders=get_ResultHeaders($lowerTable);
+
+    if(!$lowerHeaders)
+    {
+        return $headers;
+    }
+
+    else
+    {
+        return array_merge($headers,$lowerHeaders);
+    }
+}
+
+
+/*
+ * The class through which you access information from each of the tables in the database
+ */
+class Table
+{
+    /*
+     * The tables in the database
+     *
+     */
+    public static $tables = array (//0=>"slide_taxonomykingdom",1=>"slide_taxonomyphylum",
+        0=>"slide_taxonomyclass",1=>"slide_taxonomyorder",
+        2=>"slide_taxonomyinfraorder",3=>"slide_taxonomysuborder",4=>"slide_taxonomysuperfamily",5=>"slide_taxonomyfamily",
+        6=>"slide_taxonomytribe",7=>"slide_taxonomygenus",//10=>"slide_taxonomyspecies",11=>"slide_taxonomysubspecies"
+        );
+
+    public static $LatLongTable = "slide_slide";
+
+    public static $LatColumn = "specimen_coords_latitude";
+
+    public static $LongColumn = "specimen_coords_longtitude";
+
+    public static $SpeciesColumn = "taxonomy_species_id";
+
+
+    public static function get_SlideTable()
+    {
+        return "slide_slide";
+    }
+
+    public static function get_SlideCol($table)
+    {
+        switch($table)
+        {
+            case "slide_taxonomykingdom":
+                return 'taxonomy_kingdom_id';
+
+            case "slide_taxonomyphylum":
+                return 'taxonomy_phylum_id';
+
+            case "slide_taxonomyclass":
+                return 'taxonomy_class_id';
+
+            case "slide_taxonomyorder":
+                return 'taxonomy_order_id';
+
+            case "slide_taxonomyinfraorder":
+                return 'taxonomy_infraorder_id';
+
+            case "slide_taxonomysuborder":
+                return 'taxonomy_suborder_id';
+
+            case "slide_taxonomysuperfamily":
+                return 'taxonomy_superfamily_id';
+
+            case "slide_taxonomyfamily":
+                return 'taxonomy_family_id';
+
+            case "slide_taxonomytribe" :
+                return 'taxonomy_tribe_id';
+
+            case "slide_taxonomygenus" :
+                return 'taxonomy_genus_id';
+
+            case "slide_taxonomyspecies" :
+                return 'taxonomy_species_id';
+        }
+
+    }
+
+    
+    public static function get_LatLongTable()
+    {
+        return $LatLongTable;
+    }
+
+    public static function get_LatColumn()
+    {
+        return $LatColumn;
+    }
+
+    public static function get_LongColumn()
+    {
+        return $LongColumn;
+    }
+
+    public static function get_SpeciesColumn()
+    {
+        return $SpeciesColumn;
+    }
+
+    public static function getForeignColumns($table)
+    {
+        switch ($table)
+        {
+            /*
+            case self::$tables[1]:
+                return array("taxonomy_kingdom_id ");
+
+            case self::$tables[2]:
+               return array("taxonomy_phylum_id ");
+             * 
+             */
+
+            case self::$tables[1]:
+                return array("taxonomy_class_id ");
+
+            case self::$tables[2]:
+                return array("taxonomy_order_id ");
+
+            case self::$tables[3]:
+                return array("taxonomy_infraorder_id ");
+
+            case self::$tables[4]:
+                return array("taxonomy_suborder_id ");
+
+            case self::$tables[5]:
+                return array("taxonomy_superfamily_id ");
+
+            case self::$tables[6]:
+                return array("taxonomy_family_id ");
+
+            case self::$tables[7]:
+                return array("taxonomy_tribe_id ");
+
+            default:
+                return false;
+
+        }
+    }
+    
+     /*
+     * Replace each return value with the headings for each column
+     */
+    public static function getHeaders($table)
+    {
+        switch ($table)
+        {/*
+            case self::$tables[0]:
+                return array("Kingdom");
+
+            case self::$tables[1]:
+                return array("Phylum");
+         * 
+         */
+
+            case self::$tables[0]:
+               return array("Class");
+
+            case self::$tables[1]:
+                return array("Order");
+
+            case self::$tables[2]:
+                return array("Infraorder");
+
+            case self::$tables[3]:
+                return array("Suborder");
+
+            case self::$tables[4]:
+                return array("Superfamily");
+
+            case self::$tables[5]:
+                return array("Family");
+
+            case self::$tables[6]:
+                return array("Tribe");
+
+            case self::$tables[7]:
+                return array("Genus");
+
+            default:
+                return false;
+
+        }
+    }
+
+    private static function getTable($table,$counter)
+    {
+        $index = array_search($table, self::$tables) + $counter;
+
+        if($index<count(self::$tables) && $index>=0)
+            return self::$tables[$index];
+        
+        return false;
+
+    }
+
+    public static function getUpperTable($table)
+    {
+        return self::getTable($table,-1);
+    }
+
+    public static function getLowerTable($table)
+    {
+        return self::getTable($table,1);
+
+    }
+
+
+}

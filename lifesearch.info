@@ -1,0 +1,5 @@
+; $Id$
+name = "lifesearch"
+description = "An API to connect to an external database and search biological records."
+package = "Life Modules"
+core = 6.x
